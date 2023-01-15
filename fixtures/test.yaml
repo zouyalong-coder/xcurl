@@ -1,0 +1,28 @@
+
+common: # 默认
+  query:
+    keyword: test
+    regions[1]: cn
+  headers:
+    content-type: application/json
+requests:
+  baidu:
+    # 默认为 GET
+    method: GET
+    url: https://www.baidu.com # 支持完整 url（比如含 schema、query string）
+    # query：
+    #   - 使用 * 进行 overwrite，本 scope 内为 append，比如下面的 keyword；
+    #   - 默认情况则使用 append，如下面的 language
+    query:
+    headers:
+      boe: true
+  # - google:
+  #     url: https://www.bin.cn
+  # - post_test:
+  #     method: POST
+  #     url: test.com
+  #     body:
+  #       a: 1
+  #       b:
+  #         - b1=test
+
