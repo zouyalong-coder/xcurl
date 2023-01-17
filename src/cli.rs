@@ -28,12 +28,17 @@ pub struct UrlPart {
 #[derive(Args)]
 pub struct CurlArg {
     // configure
-    /// request profile in yaml.
+    // request profile in yaml.
     // #[clap(short, long)]
     // pub profile: Option<String>,
+    /// verbose mode. Print headers in stderr.
+    #[clap(short, long, default_value = "true")]
+    pub verbose: bool,
 
+    /// url to request. Query params could be given by url.
     #[clap(short, long, value_parser=parse_url)]
     pub url: UrlPart,
+    /// http method. Default is GET.
     #[clap(short, long)]
     pub method: Option<Method>,
     /// Overrides args. Could be used to override the query, headers and body of the request.

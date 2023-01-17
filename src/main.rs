@@ -4,7 +4,10 @@ use anyhow::Result;
 use clap::Parser;
 use reqwest::header::{self, HeaderMap};
 use serde_json::json;
+use std::io::Write;
 use xcurl::config::YamlConfigure;
+use xcurl::output::{select_output, Output};
+use xcurl::utils::get_content_type;
 use xcurl::KV;
 use xcurl::{config::YamlConf, Cli, CurlArg, SubCommand};
 
@@ -36,11 +39,13 @@ fn resolve_conf_path(name: &str) -> String {
 
 struct CurlRuntime {
     curl_arg: CurlArg,
+    output: Box<dyn Output>,
 }
 
 impl CurlRuntime {
     pub fn new(curl_arg: CurlArg) -> Self {
-        Self { curl_arg }
+        let output = Box::new(select_output());
+        Self { curl_arg, output }
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -53,24 +58,22 @@ impl CurlRuntime {
             .headers(headers)
             .body(body)
             .build()?;
+
         let resp = client.execute(req).await?;
-        println!("{:?}", resp);
+        let (out, err) = self.output.print_response(resp).await?;
+
+        let stderr = std::io::stderr();
+        let mut stderr = stderr.lock();
+        write!(stderr, "{}", err)?;
+
+        let stdout = std::io::stdout();
+        let mut stdout = stdout.lock();
+        write!(stdout, "{}", out)?;
         Ok(())
     }
 
     fn get_content_type(&self) -> String {
-        const DEFAULT_CT: &str = "application/json";
-        self.curl_arg
-            .get_headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|v| {
-                v.to_str()
-                    .unwrap()
-                    .split(";")
-                    .next()
-                    .and_then(|v| Some(v.to_string()))
-            })
-            .unwrap_or(DEFAULT_CT.to_string())
+        get_content_type(&self.curl_arg.get_headers())
     }
 
     /// 生成请求参数：请求头、query、body
