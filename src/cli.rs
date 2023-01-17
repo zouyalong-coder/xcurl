@@ -16,7 +16,16 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum SubCommand {
+    /// do curl.
     Curl(CurlArg),
+    /// do HTTP Get. Same as `curl -M GET`.
+    Get(CurlArg),
+    /// do HTTP Post. Same as `curl -M POST`.
+    Post(CurlArg),
+    /// do HTTP Put. Same as `curl -M PUT`.
+    Put(CurlArg),
+    /// do HTTP Delete. Same as `curl -M DELETE`.
+    Delete(CurlArg),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

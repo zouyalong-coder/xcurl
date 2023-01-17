@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use clap::Parser;
 use reqwest::header::{self, HeaderMap};
+use reqwest::Method;
 use serde_json::json;
 use std::io::Write;
 use xcurl::config::YamlConfigure;
@@ -16,6 +17,22 @@ async fn main() -> Result<()> {
     let opts = Cli::parse();
     match opts.subcmd {
         SubCommand::Curl(arg) => do_curl(arg).await,
+        SubCommand::Get(mut arg) => {
+            arg.method = Some(Method::GET);
+            do_curl(arg).await
+        }
+        SubCommand::Post(mut arg) => {
+            arg.method = Some(Method::POST);
+            do_curl(arg).await
+        }
+        SubCommand::Put(mut arg) => {
+            arg.method = Some(Method::PUT);
+            do_curl(arg).await
+        }
+        SubCommand::Delete(mut arg) => {
+            arg.method = Some(Method::DELETE);
+            do_curl(arg).await
+        }
     }
 }
 
