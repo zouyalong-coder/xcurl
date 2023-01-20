@@ -1,5 +1,6 @@
 use anyhow::Result;
-use reqwest::{header::HeaderMap, Response};
+use reqwest::header::HeaderMap;
+use serde_json::Value;
 use std::fmt::Write;
 use syntect::{
     easy::HighlightLines,
@@ -8,23 +9,16 @@ use syntect::{
     util::{as_24_bit_terminal_escaped, LinesWithEndings},
 };
 
-use crate::utils;
-
-pub async fn get_body_text(response: Response) -> Result<(String, String)> {
-    let headers = response.headers();
-    let content_type = utils::get_content_type(headers);
-    let body = response.text().await?;
-    match content_type.as_str() {
+pub fn format_body(content_type: &str, body: String) -> Result<(String, String)> {
+    match content_type {
         "application/json" => {
-            let json = serde_json::from_str(&body)?;
+            let json: Value = serde_json::from_slice(body.as_bytes())?;
             let json = serde_json::to_string_pretty(&json)?;
             Ok(("json".into(), json))
         }
-        _ => match content_type.as_str() {
-            "application/xml" => Ok(("xml".into(), body)),
-            "text/html" => Ok(("html".into(), body)),
-            _ => Ok(("txt".into(), body)),
-        },
+        "application/xml" => Ok(("xml".into(), body.to_owned())),
+        "text/html" => Ok(("html".into(), body)),
+        _ => Ok(("txt".into(), body)),
     }
 }
 

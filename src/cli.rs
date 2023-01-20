@@ -1,7 +1,7 @@
 use std::{collections::HashMap, str::FromStr};
 
 use anyhow::{anyhow, Result};
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 use reqwest::{
     header::{HeaderMap, HeaderName, HeaderValue},
     Method, Url,
@@ -12,12 +12,16 @@ use reqwest::{
 pub struct Cli {
     #[command(subcommand)]
     pub subcmd: SubCommand,
+    /// verbose mode. Print headers in stderr.
+    #[clap(short, long, action=ArgAction::SetTrue)]
+    pub verbose: Option<bool>,
 }
 
+// ref to https://docs.rs/clap/latest/clap/_derive/_tutorial/
 #[derive(Subcommand)]
 pub enum SubCommand {
-    /// do curl.
-    Curl(CurlArg),
+    /// do http request.
+    Http(CurlArg),
     /// do HTTP Get. Same as `curl -M GET`.
     Get(CurlArg),
     /// do HTTP Post. Same as `curl -M POST`.
@@ -36,30 +40,36 @@ pub struct UrlPart {
 
 #[derive(Args)]
 pub struct CurlArg {
-    // configure
-    // request profile in yaml.
-    // #[clap(short, long)]
-    // pub profile: Option<String>,
-    /// verbose mode. Print headers in stderr.
-    #[clap(short, long, default_value = "true")]
-    pub verbose: bool,
-
-    /// url to request. Query params could be given by url.
-    #[clap(short, long, value_parser=parse_url)]
-    pub url: UrlPart,
+    /// url to request. Query params should be given by url.
+    #[arg(value_parser=parse_url, value_name="URL & QUERY")]
+    pub url_and_query: UrlPart,
     /// http method. Default is GET.
     #[clap(short, long)]
     pub method: Option<Method>,
-    /// Overrides args. Could be used to override the query, headers and body of the request.
-    /// For query params, use `-e key=value`.
-    /// For headers, use `-e %key=value`.
-    /// For body, use `-e @key=value`.
-    #[clap(short, value_parser=parse_kv)]
-    pub extra_params: Vec<Param>,
+    /// form data. Same as `curl -F`.
+    #[arg(short='F', long, action=ArgAction::SetTrue, verbatim_doc_comment)]
+    pub form: bool,
+    /// multipart form data.
+    #[arg(short='f', long, action=ArgAction::SetTrue)]
+    pub multipart: bool,
+    /// offline mode for request debug. Do not send request.
+    #[arg(long, action=ArgAction::SetTrue)]
+    pub offline: bool,
+    /// Arguments for request.
+    /// - `key:value` for header.
+    /// - `key=value` for body.
+    /// - `key==value` for query.
+    #[arg(value_parser=parse_kv, value_name="HEADER & BODY", verbatim_doc_comment)]
+    pub headers_and_body: Vec<Param>,
 }
 
 fn parse_url(s: &str) -> Result<UrlPart> {
-    Url::parse(s)
+    let s = if s.starts_with("http") {
+        s.to_string()
+    } else {
+        "http://".to_string() + s
+    };
+    Url::parse(s.as_str())
         .map(|url| {
             let mut query = vec![];
             for (k, v) in url.query_pairs() {
@@ -77,23 +87,28 @@ fn parse_url(s: &str) -> Result<UrlPart> {
 }
 
 fn parse_kv(s: &str) -> Result<Param> {
-    let mut iter = s.splitn(2, '=');
-    let key = iter.next().ok_or_else(|| anyhow!("invalid key"))?.trim();
-    let value = iter.next().ok_or_else(|| anyhow!("invalid value"))?.trim();
-    match key.chars().next() {
-        Some('%') => Ok(Param::Header(KV {
-            key: key[1..].to_string(),
-            value: value.to_string(),
-        })),
-        Some('@') => Ok(Param::Body(KV {
-            key: key[1..].to_string(),
-            value: value.to_string(),
-        })),
-        Some(v) if v.is_alphabetic() => Ok(Param::Query(KV {
+    let mut iter = s.splitn(2, |c| c == ':' || c == '=');
+    let key = iter.next().ok_or(anyhow!("invalid pair"))?;
+    let value = iter.next().ok_or(anyhow!("invalid pair"))?;
+    let key = key.trim();
+    let value = value.trim();
+    match s.chars().nth(key.len()) {
+        Some(':') => Ok(Param::Header(KV {
             key: key.to_string(),
             value: value.to_string(),
         })),
-        _ => Err(anyhow!("invalid key")),
+        Some('=') => match value.chars().next() {
+            // == is query
+            Some('=') => Ok(Param::Query(KV {
+                key: key.to_string(),
+                value: value[1..].to_string(),
+            })),
+            _ => Ok(Param::Body(KV {
+                key: key.to_string(),
+                value: value.to_string(),
+            })),
+        },
+        _ => Err(anyhow!("invalid pair")),
     }
 }
 
@@ -110,9 +125,23 @@ pub enum Param {
     Body(KV),
 }
 
+impl Param {
+    pub fn is_query(&self) -> bool {
+        matches!(*self, Self::Query(_))
+    }
+
+    pub fn is_header(&self) -> bool {
+        matches!(*self, Self::Header(_))
+    }
+
+    pub fn is_body(&self) -> bool {
+        matches!(*self, Self::Body(_))
+    }
+}
+
 impl CurlArg {
     pub fn get_base_url(&self) -> &str {
-        self.url.url.as_str()
+        self.url_and_query.url.as_str()
     }
 
     pub fn get_method(&self) -> Method {
@@ -121,33 +150,30 @@ impl CurlArg {
     }
 
     pub fn get_query(&self) -> Vec<KV> {
-        let mut query_map = HashMap::new();
-        self.url.query.iter().for_each(|p| match p {
-            Param::Query(kv) => {
-                query_map.insert(kv.key.as_str(), kv);
-            }
-            _ => {}
-        });
-        let extra_query: Vec<Param> = self
-            .extra_params
+        let mut query: Vec<KV> = self
+            .url_and_query
+            .query
             .iter()
-            .filter(|&p| match *p {
-                Param::Query(_) => true,
-                _ => false,
+            .map(|p| match p {
+                Param::Query(kv) => kv.clone(),
+                _ => panic!("invalid query"),
             })
-            .map(|p| p.clone())
             .collect();
-        extra_query.iter().for_each(|p| match p {
-            Param::Query(kv) => {
-                query_map.insert(kv.key.as_str(), kv);
-            }
-            _ => {}
-        });
-        query_map.values().map(|&kv| kv.clone()).collect()
+        self.headers_and_body
+            .iter()
+            .filter_map(|p| match p {
+                Param::Query(kv) => Some(kv),
+                _ => None,
+            })
+            .for_each(|kv| {
+                query.push(kv.clone());
+            });
+        query
     }
 
     pub fn get_headers(&self) -> HeaderMap {
-        self.extra_params
+        let mut hm: HeaderMap = self
+            .headers_and_body
             .iter()
             .filter_map(|kv| match kv {
                 Param::Header(kv) => {
@@ -157,11 +183,28 @@ impl CurlArg {
                 }
                 _ => None,
             })
-            .collect()
+            .collect();
+        if self.form {
+            hm.insert(
+                HeaderName::from_static("content-type"),
+                HeaderValue::from_static("application/x-www-form-urlencoded"),
+            );
+        } else if self.multipart {
+            hm.insert(
+                HeaderName::from_static("content-type"),
+                HeaderValue::from_static("multipart/form-data"),
+            );
+        } else {
+            hm.insert(
+                HeaderName::from_static("content-type"),
+                HeaderValue::from_static("application/json"),
+            );
+        }
+        hm
     }
 
     pub fn get_body(&self) -> Vec<KV> {
-        self.extra_params
+        self.headers_and_body
             .iter()
             .filter_map(|kv| match *kv {
                 Param::Body(ref kv) => Some(kv.clone()),

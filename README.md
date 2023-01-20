@@ -13,3 +13,8 @@ XCurl 是一个命令行工具，用于发起 http 请求，并对结果进行�
 - 支持 yaml 模版（配置参数）。
 
 - 支持更多协议。
+
+## 使用方式
+```bash
+xcurl http <url and query> header:value body=value
+```

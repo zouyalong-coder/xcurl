@@ -16,7 +16,7 @@ use xcurl::{config::YamlConf, Cli, CurlArg, SubCommand};
 async fn main() -> Result<()> {
     let opts = Cli::parse();
     match opts.subcmd {
-        SubCommand::Curl(arg) => do_curl(arg).await,
+        SubCommand::Http(arg) => do_curl(arg).await,
         SubCommand::Get(mut arg) => {
             arg.method = Some(Method::GET);
             do_curl(arg).await
@@ -76,12 +76,27 @@ impl CurlRuntime {
             .body(body)
             .build()?;
 
-        let resp = client.execute(req).await?;
-        let (out, err) = self.output.print_response(resp).await?;
+        let url = req.url().to_string();
 
-        let stderr = std::io::stderr();
-        let mut stderr = stderr.lock();
-        write!(stderr, "{}", err)?;
+        if self.curl_arg.offline {
+            let (out, err) = self.output.print_request(&req)?;
+            self.print(url.as_str(), out, err).await?;
+        } else {
+            let resp = client.execute(req).await?;
+            let (out, err) = self.output.print_response(resp).await?;
+            self.print(url.as_str(), out, err).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn print(&self, url: &str, out: String, err: String) -> Result<()> {
+        {
+            let stderr = std::io::stderr();
+            let mut stderr = stderr.lock();
+            writeln!(stderr, "{}", url)?;
+            write!(stderr, "{}", err)?;
+        }
 
         let stdout = std::io::stdout();
         let mut stdout = stdout.lock();
