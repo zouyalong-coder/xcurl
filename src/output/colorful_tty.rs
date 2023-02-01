@@ -4,7 +4,7 @@ use super::{
     tools::{format_body, get_header_text_in_yaml, highlight_text},
     Output,
 };
-use anyhow::Result;
+use crate::error::Result;
 use colored::Colorize;
 use std::fmt::Write;
 
@@ -20,19 +20,29 @@ impl Output for ColorfulTTY {
         let header_text = get_header_text_in_yaml(response.headers());
         let headers = response.headers();
         let content_type = utils::get_content_type(headers);
-        let body = response.text().await?;
+        let body = {
+            let body = response.text().await?;
+            if body.is_empty() {
+                None
+            } else {
+                Some(body)
+            }
+        };
+        println!("body: {:?}", body);
         let (extension, body) = format_body(content_type.as_str(), body)?;
 
         let mut stderr = String::new();
         let mut stdout = String::new();
-        if self.stdout_color_mode {
-            write!(
-                stdout,
-                "{}",
-                highlight_text(body.as_str(), extension.as_str(), None)?
-            )?;
-        } else {
-            write!(stdout, "{}", body)?;
+        if let Some(body) = body {
+            if self.stdout_color_mode {
+                write!(
+                    stdout,
+                    "{}",
+                    highlight_text(body.as_str(), extension.as_str(), None)?
+                )?;
+            } else {
+                write!(stdout, "{}", body)?;
+            }
         }
         writeln!(stderr, "{}", head_line)?;
         if self.stderr_color_mode {
@@ -47,7 +57,7 @@ impl Output for ColorfulTTY {
         Ok((stdout, stderr))
     }
 
-    fn print_request(&self, request: &reqwest::Request) -> anyhow::Result<(String, String)> {
+    fn print_request(&self, request: &reqwest::Request) -> Result<(String, String)> {
         let mut stderr = String::new();
         let method = request.method().as_str();
         let path = request.url().path();
@@ -66,13 +76,14 @@ impl Output for ColorfulTTY {
             let v = String::from_utf8_lossy(v);
             Some(v.to_string())
         });
-        let (extension, body) = match body {
-            Some(body) => {
-                let (ext, b) = format_body(content_type.as_str(), body)?;
-                (ext, Some(b))
-            }
-            None => ("txt".to_string(), None),
-        };
+        let (extension, body) = format_body(content_type.as_str(), body)?;
+        // let (extension, body) = match body {
+        //     Some(body) => {
+        //         let (ext, b) = format_body(content_type.as_str(), body)?;
+        //         (ext, Some(b))
+        //     }
+        //     None => ("txt".to_string(), None),
+        // };
         if self.stderr_color_mode {
             write!(
                 stderr,

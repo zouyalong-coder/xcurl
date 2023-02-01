@@ -1554,7 +1554,7 @@ dependencies = [
 
 [[package]]
 name = "xcurl"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1572,6 +1572,7 @@ dependencies = [
  "serde_urlencoded",
  "serde_yaml",
  "syntect",
+ "thiserror",
  "tokio",
  "url",
 ]

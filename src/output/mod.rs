@@ -1,7 +1,7 @@
 mod colorful_tty;
 mod tools;
 
-use anyhow::Result;
+use crate::error::Result;
 
 #[async_trait::async_trait]
 pub trait Output {

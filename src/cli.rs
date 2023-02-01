@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{fs::File, io::Read, str::FromStr};
 
 use anyhow::{anyhow, Result};
 use clap::{ArgAction, Args, Parser, Subcommand};
@@ -59,6 +59,7 @@ pub struct CurlArg {
     /// - `key:value` for header.
     /// - `key=value` for body.
     /// - `key==value` for query.
+    /// value can be read from file, if value starts with `@`. For example: `key=@/path/to/file`.
     #[arg(value_parser=parse_kv, value_name="HEADER & BODY", verbatim_doc_comment)]
     pub headers_and_body: Vec<Param>,
 }
@@ -75,7 +76,7 @@ fn parse_url(s: &str) -> Result<UrlPart> {
             for (k, v) in url.query_pairs() {
                 query.push(Param::Query(KV {
                     key: k.to_string(),
-                    value: v.to_string(),
+                    value: v.parse().unwrap(),
                 }));
             }
             UrlPart {
@@ -95,17 +96,18 @@ fn parse_kv(s: &str) -> Result<Param> {
     match s.chars().nth(key.len()) {
         Some(':') => Ok(Param::Header(KV {
             key: key.to_string(),
-            value: value.to_string(),
+            value: value.parse()?,
         })),
         Some('=') => match value.chars().next() {
             // == is query
             Some('=') => Ok(Param::Query(KV {
                 key: key.to_string(),
-                value: value[1..].to_string(),
+                value: value[1..].trim().parse()?,
+                // value: value[1..].to_string(),
             })),
             _ => Ok(Param::Body(KV {
                 key: key.to_string(),
-                value: value.to_string(),
+                value: value.parse()?,
             })),
         },
         _ => Err(anyhow!("invalid pair")),
@@ -113,9 +115,40 @@ fn parse_kv(s: &str) -> Result<Param> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Value {
+    String(String),
+    File { path: String, content: String },
+}
+
+impl FromStr for Value {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.starts_with('@') {
+            let path = s[1..].to_string();
+            let mut file = File::open(path.clone())?;
+            let mut content = String::new();
+            file.read_to_string(&mut content)?;
+            Ok(Self::File { path, content })
+        } else {
+            Ok(Self::String(s.to_string()))
+        }
+    }
+}
+
+impl Value {
+    pub fn value(&self) -> &str {
+        match self {
+            Self::String(s) => s.as_str(),
+            Self::File { content, .. } => content.as_str(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KV {
     pub key: String,
-    pub value: String,
+    pub value: Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -178,7 +211,7 @@ impl CurlArg {
             .filter_map(|kv| match kv {
                 Param::Header(kv) => {
                     let key = HeaderName::from_str(&kv.key).unwrap();
-                    let value = HeaderValue::from_str(&kv.value).unwrap();
+                    let value = HeaderValue::from_str(kv.value.value()).unwrap();
                     Some((key, value))
                 }
                 _ => None,

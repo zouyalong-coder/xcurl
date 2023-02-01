@@ -1,19 +1,20 @@
-use std::collections::HashMap;
+use std::env;
 
-use anyhow::Result;
 use clap::Parser;
-use reqwest::header::{self, HeaderMap};
+use reqwest::header::HeaderMap;
 use reqwest::Method;
 use serde_json::json;
 use std::io::Write;
-use xcurl::config::YamlConfigure;
+use xcurl::error::Result;
 use xcurl::output::{select_output, Output};
 use xcurl::utils::get_content_type;
-use xcurl::KV;
-use xcurl::{config::YamlConf, Cli, CurlArg, SubCommand};
+use xcurl::{Cli, CurlArg, SubCommand};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if env::var("RUST_LOG").is_err() {
+        env::set_var("RUST_LOG", "info")
+    }
     let opts = Cli::parse();
     match opts.subcmd {
         SubCommand::Http(arg) => do_curl(arg).await,
@@ -37,21 +38,8 @@ async fn main() -> Result<()> {
 }
 
 async fn do_curl(arg: CurlArg) -> Result<()> {
-    // let conf = match arg.profile {
-    //     Some(name) => {
-    //         let path = resolve_conf_path(&name);
-    //         YamlConf::load_yaml(&path).await?
-    //     }
-    //     None => YamlConf::empty(),
-    // };
     let rt = CurlRuntime::new(arg);
     rt.run().await
-}
-
-#[inline]
-fn resolve_conf_path(name: &str) -> String {
-    const WORKSPACE: &str = "~/.xcurl";
-    format!("{}/{}.yaml", WORKSPACE, name)
 }
 
 struct CurlRuntime {
@@ -115,23 +103,24 @@ impl CurlRuntime {
             .curl_arg
             .get_query()
             .iter()
-            .map(|kv| (kv.key.clone(), kv.value.clone()))
+            .map(|kv| (kv.key.clone(), kv.value.value().to_string()))
             .collect();
         let body = self.curl_arg.get_body();
         let mut body_json = json!({});
         for kv in body {
-            body_json[kv.key] = json!(kv.value);
+            body_json[kv.key] = json!(kv.value.value().to_string());
         }
         let body = match self.get_content_type().as_str() {
             "application/json" => serde_json::to_string(&body_json)?,
             "application/x-www-form-urlencoded" | "multipart/form-data" => {
-                serde_qs::to_string(&body_json)?
+                serde_qs::to_string(&body_json).map_err(|x| anyhow::anyhow!(x))?
             }
             _ => {
                 return Err(anyhow::anyhow!(
                     "unsupported body encoding: {}",
                     self.get_content_type()
-                ))
+                )
+                .into())
             }
         };
         Ok((headers, query, body))

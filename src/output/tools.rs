@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::error::Result;
 use reqwest::header::HeaderMap;
 use serde_json::Value;
 use std::fmt::Write;
@@ -9,16 +9,20 @@ use syntect::{
     util::{as_24_bit_terminal_escaped, LinesWithEndings},
 };
 
-pub fn format_body(content_type: &str, body: String) -> Result<(String, String)> {
+pub fn format_body(content_type: &str, body: Option<String>) -> Result<(String, Option<String>)> {
+    let body = match body {
+        Some(body) => body,
+        None => return Ok(("".into(), None)),
+    };
     match content_type {
         "application/json" => {
             let json: Value = serde_json::from_slice(body.as_bytes())?;
             let json = serde_json::to_string_pretty(&json)?;
-            Ok(("json".into(), json))
+            Ok(("json".into(), Some(json)))
         }
-        "application/xml" => Ok(("xml".into(), body.to_owned())),
-        "text/html" => Ok(("html".into(), body)),
-        _ => Ok(("txt".into(), body)),
+        "application/xml" => Ok(("xml".into(), Some(body.to_owned()))),
+        "text/html" => Ok(("html".into(), Some(body))),
+        _ => Ok(("txt".into(), Some(body))),
     }
 }
 
